@@ -2,12 +2,22 @@ library(tidyverse)
 library(stringr)
 library(dplyr)
 library(ggplot2)
+library(patchwork)
+library(ggtext)
 
 setwd('~/Desktop/r/fuzzy')
 retractions <- read_csv("retraction_watch-2.csv")
 view(retractions)
 
-# cleaning the RetractionWatch data, separating by year and for "fuzzy."
+# counting all AI retractions ever, (9090/68337 as of Jan 2026)
+
+nrow(retractions)
+count_aided <- sum(grepl("\\bComputer-Aided\\b", retractions$Reason, ignore.case = TRUE))
+count_generated <- sum(grepl("\\bComputer-Generated\\b", retractions$Reason, ignore.case = TRUE))
+print(paste("Computer-Aided:", count_aided))
+print(paste("Computer-Generated:", count_generated))
+
+# cleaning the Retraction Watch data, separating by year and for "fuzzy."
 
 filtered_retractions <- retractions %>%
     mutate(RetractionDate = as.Date(RetractionDate, format = "%m/%d/%Y"))
@@ -21,6 +31,36 @@ fuzzy_retractions <- year_retractions %>%
 fuzzy_retractions <- fuzzy_retractions %>% select(-Author, -URLS, -RetractionNature, -ArticleType, -Paywalled)
 
 view(fuzzy_retractions)
+
+#seeing about what countries
+
+country_summary <- fuzzy_retractions %>%
+  group_by(Country) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# country chart by retractions
+
+country_summary %>%
+  head(10) %>%
+  ggplot(aes(x = reorder(Country, count), y = count)) +
+  geom_bar(stat = "identity", fill = "#5097A4") +
+  geom_text(aes(label = count), hjust = -0.2, family = "mono", size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Retracted Papers on Fuzzy Logic by Country (Top 10)",
+       x = NULL,
+       y = "Number of Retractions") +
+  theme_minimal() +
+  theme(text = element_text(family = "mono"),
+        axis.text = element_text(family = "mono"),
+        plot.title = element_text(family = "mono"),
+        axis.title.y = element_text(vjust = 4))
+
+# fuzzy retractions on AI/computer papers
+
+computer_papers <- fuzzy_retractions[grepl("computer", fuzzy_retractions$Subject, ignore.case = TRUE), ]
+nrow(computer_papers)
 
 # did some Excel filtering and additions of PubMed data, pulling in here.
 
@@ -42,134 +82,18 @@ fuzzy_clean %>%
     group = factor(Still_Live)
   )) +
   geom_line() +
+  geom_point() +
+  labs(title = "Fuzzy Logic Paper Retractions Over Time", 
+       y = "Papers Retracted", color = "Retractions") +
   theme_minimal() +
-  geom_point()
+  theme(text = element_text(family = "mono"),
+        axis.text = element_text(family = "mono"),
+        plot.title = element_text(family = "mono"),
+        legend.text = element_text(family = "mono"))
 
-# making a donut chart to compare retractions 
-
-donut_df <- fuzzy_clean %>%
-  mutate(status = ifelse(Still_Live == 1, "Still live", "Retracted")) %>%
-  count(status) %>%
-  mutate(
-    fraction = n / sum(n),
-    ymax = cumsum(fraction),
-    ymin = lag(ymax, default = 0)
-  )
-
-donut_df <- donut_df %>%
-  mutate(label = paste0(status, "\n", round(fraction * 100, 1), "%"))
-
-ggplot(donut_df, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = status)) +
-  geom_rect() +
-  coord_polar(theta = "y") +
-  xlim(c(2, 4)) +
-  theme_void() +
-  geom_text(
-    aes(x = 3.5, y = (ymin + ymax) / 2, label = label),
-    size = 4)
-
-
-
-top_journals <- fuzzy_clean %>%
-  count(Journal, sort = TRUE) %>%
-  slice_head(n = 6) %>%
-  pull(Journal)
-
-fuzzy_clean_sorted <- fuzzy_clean %>%
-  mutate(top6 = Journal %in% top_journals) %>%
-  arrange(desc(top6), Journal)
-
-view(fuzzy_clean_sorted)
-
-fuzzy_donut <- fuzzy_clean_sorted %>%
-  filter(Journal %in% top_journals) %>%
-  mutate(status = ifelse(Still_Live == 1, "Still live", "Retracted")) %>%
-  count(Journal, Year, status) %>%
-  group_by(Journal, Year) %>%
-  mutate(
-    fraction = n / sum(n),
-    ymax = cumsum(fraction),
-    ymin = lag(ymax, default = 0)
-  ) %>%
-  ungroup()
-
-ggplot(fuzzy_donut,
-       aes(ymax = ymax, ymin = ymin,
-           xmax = 4, xmin = 3,
-           fill = status)) +
-  geom_rect(color = "white") +
-  coord_polar(theta = "y") +
-  xlim(c(2, 4)) +
-  facet_wrap(~ Journal) +
-  theme_void() +
-  labs(fill = "Paper status")
-
-
-
-
-
-
-donut_year_df <- fuzzy_clean %>%
-  # first filter the rows you want
-  filter(
-    !is.na(Year),      # remove NA years
-    Year >= 2019,      # only from 2019 onwards
-    Year != 2026       # exclude 2026
-  ) %>%
-  # create status column
-  mutate(
-    status = ifelse(Still_Live == 1, "Still live", "Retracted")
-  ) %>%
-  # count number of papers per Year and status
-  count(Year, status) %>%
-  group_by(Year) %>%
-  mutate(
-    fraction = n / sum(n),
-    ymax = cumsum(fraction),
-    ymin = lag(ymax, default = 0),
-    label = paste0(round(fraction * 100, 1), "%")
-  ) %>%
-  ungroup()
-
-# Basic donut plot
-ggplot(donut_year_df,
-       aes(ymax = ymax, ymin = ymin,
-           xmax = 4, xmin = 3,
-           fill = status)) +
-  geom_rect(color = "white") +
-  coord_polar(theta = "y") +
-  xlim(c(2, 4)) +
-  facet_wrap(~ Year) +
-  theme_void() +
-  labs(fill = "Paper status")
-
-# Donut plot with labels
-ggplot(donut_year_df,
-       aes(ymax = ymax, ymin = ymin,
-           xmax = 4, xmin = 3,
-           fill = status)) +
-  geom_rect(color = "white") +
-  coord_polar(theta = "y") +
-  xlim(c(2, 4)) +
-  facet_wrap(~ Year) +
-  theme_void() +
-  geom_text(
-    aes(x = 3.5, y = (ymin + ymax) / 2, label = label),
-    size = 3
-  ) +
-  labs(fill = "Paper status")
-
-
-
-
-
-
-library(dplyr)
-library(ggplot2)
-library(patchwork)
-library(ggtext)    # for rich text in labels
 
 # Prepare data (filtered)
+
 donut_year_df <- fuzzy_clean %>%
   filter(
     !is.na(Year),
@@ -189,7 +113,8 @@ donut_year_df <- fuzzy_clean %>%
   ) %>%
   ungroup()
 
-# Donut plot with gradient fill and bold labels
+# donut plot with gradient fill and bold labels
+
 donut_plot <- ggplot(donut_year_df,
                      aes(ymax = ymax, ymin = ymin,
                          xmax = 4, xmin = 3,
@@ -205,10 +130,13 @@ donut_plot <- ggplot(donut_year_df,
     "Still live" = "#5097A4",
     "Retracted" = "#CD5555")) +
   labs(fill = "Paper status") +
-  theme(strip.text = element_text(face="bold", size=12)) +
-  ggtitle("Paper Status by Year (Donut Charts)")
+  theme(
+    strip.text = element_text(face="bold", size=12),
+    text = element_text(family = "mono"),) +
+  ggtitle("Paper Status by Year")
 
 # Bar chart with patterned fill and labels
+
 bar_plot <- donut_year_df %>%
   ggplot(aes(x = factor(Year), y = n, fill = status)) +
   geom_col(color = "white", width = 0.7) +
@@ -226,21 +154,22 @@ bar_plot <- donut_year_df %>%
   theme(
     panel.grid.major.x = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.text.x = element_text(face="bold")
+    axis.text.x = element_text(face="bold"),
+    text = element_text(family = "mono"),
   )
 
 combined_plot <- donut_plot / bar_plot + 
   plot_layout(heights = c(2, 1)) +
   plot_annotation(
-    title = "Research on fuzzy logic gets retracted — a lot.",
-    subtitle = "Donut charts show fractions, bar chart shows counts",
-    caption = "Data: fuzzy_clean dataset",
+    title = "Research on the fringe theory of fuzzy logic gets retracted — a lot.",
+    subtitle = "And, most retractions regarding are due to AI use, the very concept fuzzy logic was once thought to inform.",
+    caption = "Data: Retraction Watch, PubMed",
     theme = theme(
       plot.title = element_text(face = "bold", size = 16),
-      plot.subtitle = element_text(size = 12),
-      plot.caption = element_text(size = 10, color = "gray40")
-    )
-  )
+      plot.subtitle = element_text(size = 9),
+      plot.caption = element_text(size = 8)
+    ) 
+  )  
 
 combined_plot
 
