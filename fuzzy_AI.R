@@ -1,9 +1,11 @@
 library(tidyverse)
 library(stringr)
 library(dplyr)
+library(tidyr)
 library(ggplot2)
 library(patchwork)
 library(ggtext)
+
 
 setwd('~/Desktop/r/fuzzy')
 retractions <- read_csv("retraction_watch-2.csv")
@@ -92,84 +94,80 @@ fuzzy_clean %>%
         legend.text = element_text(family = "mono"))
 
 
-# Prepare data (filtered)
+#final plot
 
-donut_year_df <- fuzzy_clean %>%
-  filter(
-    !is.na(Year),
-    Year >= 2019,
-    Year != 2026
-  ) %>%
-  mutate(
-    status = ifelse(Still_Live == 1, "Still live", "Retracted")
-  ) %>%
+pie_df <- fuzzy_clean %>%
+  filter(!is.na(Year), Year >= 2019, Year != 2026) %>%
+  mutate(status = ifelse(Still_Live == 1, "Still live", "Retracted")) %>%
   count(Year, status) %>%
+  complete(
+    Year,
+    status = c("Still live", "Retracted"),
+    fill = list(n = 0)
+  ) %>%
   group_by(Year) %>%
   mutate(
-    fraction = n / sum(n),
+    total = sum(n),
+    fraction = ifelse(total > 0, n / total, 0),
     ymax = cumsum(fraction),
     ymin = lag(ymax, default = 0),
-    label = paste0("<b>", round(fraction*100,1), "%</b>")
+    mid = (ymax + ymin) / 2
   ) %>%
-  ungroup()
-
-# donut plot with gradient fill and bold labels
-
-donut_plot <- ggplot(donut_year_df,
-                     aes(ymax = ymax, ymin = ymin,
-                         xmax = 4, xmin = 3,
-                         fill = status)) +
-  geom_rect(color = "white", size = 0.5) +
-  coord_polar(theta = "y") +
-  xlim(c(2, 4)) +
-  facet_wrap(~ Year) +
-  theme_void() +
-  geom_richtext(aes(x = 3.5, y = (ymin + ymax)/2, label = label),
-                size = 3, fill = NA, label.color = NA) +
-  scale_fill_manual(values = c(
-    "Still live" = "#5097A4",
-    "Retracted" = "#CD5555")) +
-  labs(fill = "Paper status") +
-  theme(
-    strip.text = element_text(face="bold", size=12),
-    text = element_text(family = "mono"),) +
-  ggtitle("Paper Status by Year")
-
-# Bar chart with patterned fill and labels
-
-bar_plot <- donut_year_df %>%
-  ggplot(aes(x = factor(Year), y = n, fill = status)) +
-  geom_col(color = "white", width = 0.7) +
-  geom_text(aes(label = n), position = position_stack(vjust = 0.5), color = "white") +
-  scale_fill_manual(values = c(
-    "Still live" = "#5097A4", 
-    "Retracted" = "#CD5555")) +
-  theme_minimal(base_size = 12) +
-  labs(
-    x = "Year",
-    y = "Number of Papers",
-    fill = "Paper Status",
-    title = "Total Papers per Year"
-  ) +
-  theme(
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(face="bold"),
-    text = element_text(family = "mono"),
+  ungroup() %>%
+  mutate(
+    radius = 1,
+    xmin = 0,
+    xmax = radius,
+    label_x = radius * 0.6
   )
 
-combined_plot <- donut_plot / bar_plot + 
-  plot_layout(heights = c(2, 1)) +
-  plot_annotation(
-    title = "Research on the fringe theory of fuzzy logic gets retracted — a lot.",
-    subtitle = "And, most retractions regarding are due to AI use, the very concept fuzzy logic was once thought to inform.",
+# Ensure correct year order
+pie_df$Year <- factor(pie_df$Year, levels = 2019:2025)
+
+ggplot(pie_df,
+       aes(ymax = ymax,
+           ymin = ymin,
+           xmax = xmax,
+           xmin = xmin,
+           fill = status)) +
+  
+  geom_rect(color = "white", size = 0.4) +
+  coord_polar(theta = "y") +
+  facet_wrap(~ Year, nrow = 2) +
+  
+  geom_text(
+    aes(x = label_x, y = mid, label = ifelse(n > 0, n, "")),
+    color = "white",
+    fontface = "bold",
+    size = 3
+  ) +
+  
+  scale_fill_manual(values = c(
+    "Still live" = "#5097A4",
+    "Retracted" = "#CD5555"
+  )) +
+  
+  theme_void() +
+  labs(
+    title = "Research on fuzzy logic gets retracted — a lot.",
+    subtitle = "Most retractions are due to AI use, the very concept the \nfringe theory of fuzzy logic was once thought to inform.",
     caption = "Data: Retraction Watch, PubMed",
-    theme = theme(
-      plot.title = element_text(face = "bold", size = 16),
-      plot.subtitle = element_text(size = 9),
-      plot.caption = element_text(size = 8)
-    ) 
-  )  
-
-combined_plot
-
+    fill = "Paper Status"
+  ) +
+  
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    text = element_text(family = "Futura"),
+    plot.title = element_text(
+      face = "bold",
+      size = 13,  
+      margin = margin(b = 8)
+    ),
+    plot.subtitle = element_text(
+      size = 11,
+      margin = margin(b = 20)
+    ),
+    plot.margin = margin(40, 60, 40, 60),
+    legend.position = c(.8, .3),  
+    legend.justification = c(0, 0.5),
+  )
